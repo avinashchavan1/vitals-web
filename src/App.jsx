@@ -17,6 +17,32 @@ const MONO = "'JetBrains Mono',monospace";
 const GEIST = "'Geist',sans-serif";
 const PLEX = "'IBM Plex Sans',sans-serif";
 
+// Backend parse endpoint: set VITE_PARSE_API at build, or override at runtime with ?api=<url>.
+// When set, the export is UPLOADED to that server for parsing (not client-side).
+const API = ((import.meta.env && import.meta.env.VITE_PARSE_API) ||
+  (typeof location !== 'undefined' && new URLSearchParams(location.search).get('api')) || '').replace(/\/+$/, '');
+
+function safeJSON(t) { try { return JSON.parse(t); } catch { return null; } }
+
+// Upload the file to the parse server (XHR for real upload progress) → dataset JSON.
+function uploadParse(api, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', api + '/parse');
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress({ note: 'uploading ' + Math.round(e.loaded / e.total * 100) + '% · ' + (e.loaded / 1e6).toFixed(1) + ' MB', bytes: e.loaded }); };
+    xhr.upload.onload = () => onProgress({ note: 'parsing on server…' });
+    xhr.onload = () => {
+      const d = safeJSON(xhr.responseText);
+      if (xhr.status >= 200 && xhr.status < 300 && d && d.days) resolve(d);
+      else reject(new Error((d && d.error) || ('Server error ' + xhr.status)));
+    };
+    xhr.onerror = () => reject(new Error('Could not reach the parse server at ' + api + '. Is it running, and is CORS allowed?'));
+    xhr.ontimeout = () => reject(new Error('The parse server timed out.'));
+    const fd = new FormData(); fd.append('file', file, file.name || 'export');
+    xhr.send(fd);
+  });
+}
+
 export default function App() {
   const [phase, setPhase] = useState('landing'); // landing | parsing | ready | error
   const [progress, setProgress] = useState({ records: 0, bytes: 0, note: '' });
@@ -25,10 +51,11 @@ export default function App() {
   const [state, setState] = useState(INITIAL_STATE);
 
   async function ingest(file) {
-    setPhase('parsing'); setProgress({ records: 0, bytes: 0, note: '' }); setErrMsg('');
-    console.log('[vitals] ingest', file && file.name, file && file.type, file && file.size);
+    setPhase('parsing'); setProgress({ records: 0, bytes: 0, note: API ? 'uploading to server…' : '' }); setErrMsg('');
+    console.log('[vitals] ingest', file && file.name, file && file.type, file && file.size, API ? '(server ' + API + ')' : '(client-side)');
     try {
-      const dataset = await parseHealthExport(file, (p) => setProgress((prev) => ({ ...prev, ...p })));
+      const onP = (p) => setProgress((prev) => ({ ...prev, ...p }));
+      const dataset = API ? await uploadParse(API, file, onP) : await parseHealthExport(file, onP);
       console.log('[vitals] dataset', dataset.meta);
       globalThis.__vitalsReal = dataset;
       globalThis.__htCache = {};
@@ -61,7 +88,8 @@ function Landing({ phase, progress, errMsg, onFile, onPreview, onRetry }) {
         <div style={S('display:flex;flex-direction:column;gap:6px')}>
           <span style={S(`font-family:${MONO};font-size:12px;letter-spacing:0.22em;color:#4CC2D6;text-transform:uppercase`)}>◈ Vitals · Health Telemetry</span>
           <span style={S(`font-family:${GEIST};font-size:28px;font-weight:600;letter-spacing:-0.02em`)}>On-device health analytics</span>
-          <span style={S(`font-family:${PLEX};font-size:14px;color:#7D8FA3;line-height:1.6`)}>Recovery, strain, sleep, VO₂ and the four-year ribbon — computed from your Apple Health export, entirely in this browser. Nothing is uploaded.</span>
+          <span style={S(`font-family:${PLEX};font-size:14px;color:#7D8FA3;line-height:1.6`)}>Recovery, strain, sleep, VO₂ and the four-year ribbon — computed from your Apple Health export{API ? ' on your parse server.' : ', entirely in this browser. Nothing is uploaded.'}</span>
+          {API ? <span style={S(`font-family:${MONO};font-size:10px;color:#E8A33D;letter-spacing:0.06em`)}>SERVER MODE · export is uploaded to {API.replace(/^https?:\/\//, '')}</span> : null}
         </div>
 
         {phase === 'parsing' ? (
@@ -85,7 +113,7 @@ function Landing({ phase, progress, errMsg, onFile, onPreview, onRetry }) {
             onClick={() => inputRef.current && inputRef.current.click()}
             style={S(`background:#161C24;border:1px dashed ${drag ? '#4CC2D6' : '#232C38'};border-radius:14px;padding:34px 22px;display:flex;flex-direction:column;gap:8px;align-items:center;cursor:pointer;transition:border-color 140ms ease`)}>
             <span style={S(`font-family:${MONO};font-size:13px;color:#4CC2D6`)}>Drop export.zip or export.xml</span>
-            <span style={S(`font-family:${PLEX};font-size:12px;color:#7D8FA3;text-align:center;line-height:1.6`)}>or click to choose. The file never leaves your device.</span>
+            <span style={S(`font-family:${PLEX};font-size:12px;color:#7D8FA3;text-align:center;line-height:1.6`)}>{API ? 'or click to choose. Uploaded to your server for parsing.' : 'or click to choose. The file never leaves your device.'}</span>
             <input ref={inputRef} type="file" accept=".zip,.xml" onChange={(e) => pick(e.target.files[0])} style={S('display:none')} />
           </div>
         )}

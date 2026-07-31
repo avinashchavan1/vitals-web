@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync:server": "cp src/parseCore.js server/parseCore.js && node -e \"const f='server/parseCore.js',fs=require('fs');fs.writeFileSync(f,'// COPY of ../src/parseCore.js — keep in sync via: npm run sync:server\\n'+fs.readFileSync(f,'utf8'))\""
   },
   "dependencies": {
     "fflate": "^0.8.2",

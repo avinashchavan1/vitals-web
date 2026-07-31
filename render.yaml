@@ -1,0 +1,14 @@
+# Render Blueprint — deploys the parse server as a free always-on web service.
+# In Render: New → Blueprint → connect the vitals-web repo → it reads this file.
+services:
+  - type: web
+    name: vitals-parse
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /
+    envVars:
+      - key: CORS_ORIGIN
+        value: "*"   # tighten to your site origin, e.g. https://vitals-health-telemetry.netlify.app
