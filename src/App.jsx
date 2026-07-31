@@ -19,19 +19,22 @@ const PLEX = "'IBM Plex Sans',sans-serif";
 
 export default function App() {
   const [phase, setPhase] = useState('landing'); // landing | parsing | ready | error
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress] = useState({ records: 0, bytes: 0, note: '' });
   const [errMsg, setErrMsg] = useState('');
   const [isReal, setIsReal] = useState(false);
   const [state, setState] = useState(INITIAL_STATE);
 
   async function ingest(file) {
-    setPhase('parsing'); setProgress(0); setErrMsg('');
+    setPhase('parsing'); setProgress({ records: 0, bytes: 0, note: '' }); setErrMsg('');
+    console.log('[vitals] ingest', file && file.name, file && file.type, file && file.size);
     try {
-      const dataset = await parseHealthExport(file, ({ records }) => setProgress(records));
+      const dataset = await parseHealthExport(file, (p) => setProgress((prev) => ({ ...prev, ...p })));
+      console.log('[vitals] dataset', dataset.meta);
       globalThis.__vitalsReal = dataset;
       globalThis.__htCache = {};
       setIsReal(true); setState(INITIAL_STATE); setPhase('ready');
     } catch (e) {
+      console.error('[vitals] ingest failed:', e);
       setErrMsg(String(e && e.message || e)); setPhase('error');
     }
   }
@@ -62,10 +65,11 @@ function Landing({ phase, progress, errMsg, onFile, onPreview, onRetry }) {
         </div>
 
         {phase === 'parsing' ? (
-          <div style={S('background:#161C24;border:1px solid #232C38;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:10px;align-items:center')}>
+          <div style={S('background:#161C24;border:1px solid #232C38;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:8px;align-items:center')}>
             <span style={S(`font-family:${MONO};font-size:12px;color:#4CC2D6`)}>PARSING EXPORT…</span>
-            <span style={S(`font-family:${MONO};font-size:22px;font-weight:700`)}>{progress.toLocaleString('en-US')}</span>
-            <span style={S(`font-family:${MONO};font-size:10px;color:#7D8FA3`)}>records read · all in-browser</span>
+            <span style={S(`font-family:${MONO};font-size:22px;font-weight:700`)}>{(progress.records || 0).toLocaleString('en-US')}</span>
+            <span style={S(`font-family:${MONO};font-size:10px;color:#7D8FA3`)}>records · {((progress.bytes || 0) / 1e6).toFixed(1)} MB read · in-browser</span>
+            {progress.note ? <span style={S(`font-family:${MONO};font-size:9px;color:#7D8FA3`)}>{progress.note}</span> : null}
           </div>
         ) : phase === 'error' ? (
           <div style={S('background:#161C24;border:1px solid #E05252;border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:8px')}>
