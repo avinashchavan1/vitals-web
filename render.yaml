@@ -11,4 +11,4 @@ services:
     healthCheckPath: /
     envVars:
       - key: CORS_ORIGIN
-        value: "*"   # tighten to your site origin, e.g. https://vitals-health-telemetry.netlify.app
+        value: "https://vitals-health-telemetry.netlify.app"   # only your site may call the server
