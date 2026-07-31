@@ -178,6 +178,45 @@ async function parseZipStream(file, agg, onProgress) {
   if (!matched) throw new Error('No export.xml inside the archive. Entries seen: ' + (seen.slice(0, 10).join(', ') || 'none') + '. Is this the Health "Export All Health Data" zip?');
 }
 
+/// Chunk-fed streaming parser. The MAIN thread reads the file (reliable on iOS) and pushes raw
+/// byte chunks here (inside the Worker). Keeps the heavy unzip/parse off the UI thread.
+export class StreamParser {
+  constructor(isZip, onProgress) {
+    this.isZip = isZip;
+    this.agg = new HealthAggregator(onProgress);
+    this.dec = new TextDecoder();
+    if (isZip) {
+      this.unzip = new Unzip(); this.unzip.register(UnzipInflate);
+      this.matched = false; this.seen = []; this.err = null;
+      this.unzip.onfile = (f) => {
+        this.seen.push(f.name);
+        onProgress && onProgress({ note: 'reading ' + f.name });
+        if (!this.matched && /(^|\/)export\.xml$/i.test(f.name)) {
+          this.matched = true; log('found', f.name);
+          f.ondata = (e, chunk, final) => { if (e) { this.err = e; return; } if (chunk && chunk.length) this.agg.feed(this.dec.decode(chunk, { stream: !final })); if (final) this.agg.finish(); };
+          f.start();
+        }
+      };
+    }
+  }
+  push(bytes) {
+    if (this.isZip) { this.unzip.push(bytes, false); if (this.err) throw this.err; }
+    else { this.agg.feed(this.dec.decode(bytes, { stream: true })); }
+  }
+  finish() {
+    if (this.isZip) {
+      this.unzip.push(new Uint8Array(0), true);
+      if (this.err) throw this.err;
+      if (!this.matched) throw new Error('No export.xml inside the archive. Entries seen: ' + (this.seen.slice(0, 10).join(', ') || 'none') + '. Is this the Health "Export All Health Data" zip?');
+    } else { this.agg.feed(this.dec.decode()); this.agg.finish(); }
+    return finalize(this.agg);
+  }
+}
+
+export function isZipFile(file) {
+  return /\.zip$/i.test((file && file.name) || '') || /zip/i.test((file && file.type) || '');
+}
+
 /// Actual parse (runs in the Worker). Returns the dataset.
 export async function parseFile(file, onProgress) {
   log('file:', file && file.name, file && file.type, (file && file.size) + ' bytes');
